@@ -1,4 +1,4 @@
 window.CFG = {
-  SUPABASE_URL: 'https://https://wwervnjvjshonsiyivej.supabase.co/rest/v1/',
-  SUPABASE_ANON_KEY: 'eyJhbGciOi...sb_publishable_gLsA_xOZJNpgGPpwfWy_-g_xbvkiXUq...'
+  SUPABASE_URL: 'https://wwervnjvjshonsiyivej.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_ПОЛНЫЙ_КЛЮЧ_ЦЕЛИКОМ'
 };
