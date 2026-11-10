@@ -21,24 +21,27 @@ function render(){REDRAW()}
 
 /* ---------- модель и расчёты ---------- */
 function newSheet(){return{name:'',auditor:'',prof:'',salary:0,interest:0,taxes:0,mort:0,edu:0,car:0,cc:0,small:0,other:0,kids:0,perKid:0,loan:0,
-  cardSavings:0,savings:0,stocks:[],re:[],biz:[],debt:{mort:0,edu:0,car:0,cc:0,small:0},fast:null,log:[],
+  cardSavings:0,savings:0,stocks:[],re:[],biz:[],deals:{},debt:{mort:0,edu:0,car:0,cc:0,small:0},fast:null,log:[],
   started:false,turn:0,skip:0,charity:0,bankrupt:false,out:false,exitTurn:null,wonAt:null,real:false,cur:'$',
   stats:{doodads:0,doodadSum:0,loans:0,loanSum:0,charity:0,manual:0}}}
 function normSheet(p){const d=newSheet();const s=Object.assign(d,p||{});s.stats=Object.assign(d.stats,(p&&p.stats)||{});s.debt=Object.assign(d.debt,(p&&p.debt)||{});['stocks','re','biz','log'].forEach(k=>{if(!Array.isArray(s[k]))s[k]=[]});return s}
 function sum(a,k){return a.reduce((t,x)=>t+(+x[k]||0),0)}
 function calc(p){
   const div=sum(p.stocks,'div'),re=sum(p.re,'income'),biz=sum(p.biz,'income');
-  const ratPassive=(+p.interest||0)+div+re+biz;
+  const DL=Object.values(p.deals||{}).filter(x=>x.state==='active');
+  const pIn=DL.filter(x=>x.role==='lender').reduce((t,x)=>t+(+x.monthly||0),0),pOut=DL.filter(x=>x.role==='borrower').reduce((t,x)=>t+(+x.monthly||0),0);
+  const pLent=DL.filter(x=>x.role==='lender').reduce((t,x)=>t+(+x.amount||0),0),pBorr=DL.filter(x=>x.role==='borrower').reduce((t,x)=>t+(+x.amount||0),0);
+  const ratPassive=(+p.interest||0)+div+re+biz+pIn;
   const kidsExp=(+p.kids||0)*(+p.perKid||0),loanPay=(+p.loan||0)/10;
-  const exp=EXP.reduce((t,[k])=>t+(+p[k]||0),0)+kidsExp+loanPay;
+  const exp=EXP.reduce((t,[k])=>t+(+p[k]||0),0)+kidsExp+loanPay+pOut;
   let passive,income,cf,goal=null,dreamCost=0;
   if(p.fast){const fb=sum(p.fast.biz,'income');passive=p.fast.start+fb;income=passive;cf=passive;goal=p.fast.start+50000;dreamCost=(+p.fast.dreamCost||0)*(1+(+p.fast.bumps||0))}
   else{passive=ratPassive;income=(+p.salary||0)+passive;cf=income-exp}
-  const assets=(+p.savings||0)+(p.started?0:(+p.cardSavings||0))+p.stocks.reduce((t,s)=>t+s.qty*s.price,0)+sum(p.re,'cost')+sum(p.biz,'cost');
-  const liab=DEBT.reduce((t,[k])=>t+(+p.debt[k]||0),0)+sum(p.re,'debt')+sum(p.biz,'debt')+(+p.loan||0);
+  const assets=(+p.savings||0)+(p.started?0:(+p.cardSavings||0))+p.stocks.reduce((t,s)=>t+s.qty*s.price,0)+sum(p.re,'cost')+sum(p.biz,'cost')+pLent;
+  const liab=DEBT.reduce((t,[k])=>t+(+p.debt[k]||0),0)+sum(p.re,'debt')+sum(p.biz,'debt')+(+p.loan||0)+pBorr;
   const won=!!(p.fast&&(passive>=goal||p.fast.dreamBought));
   const prog=goal?Math.min(100,passive/goal*100):(exp?Math.min(100,ratPassive/exp*100):0);
-  return{div,re,biz,ratPassive,kidsExp,loanPay,exp,passive,income,cf,goal,dreamCost,assets,liab,won,prog,net:assets-liab}
+  return{pIn,pOut,pLent,pBorr,div,re,biz,ratPassive,kidsExp,loanPay,exp,passive,income,cf,goal,dreamCost,assets,liab,won,prog,net:assets-liab}
 }
 function summ(p){const c=calc(p);return{stage:p.fast?'fast':'rat',won:c.won,passive:Math.round(c.passive),exp:Math.round(c.exp),cf:Math.round(c.cf),net:Math.round(c.net),assets:Math.round(c.assets),liab:Math.round(c.liab),prog:Math.round(c.prog),prof:p.prof||'',savings:Math.round(+p.savings||0),turn:p.turn||0,exitTurn:p.exitTurn,real:!!p.real,wonAt:p.wonAt||null}}
 
@@ -46,7 +49,7 @@ function summ(p){const c=calc(p);return{stage:p.fast?'fast':'rat',won:c.won,pass
 function getRef(path){const a=path.split('.');let o=P();for(let i=0;i<a.length-1;i++)o=o[a[i]];return[o,a[a.length-1]]}
 function setv(path,v,type){if(LOCK)return;const[o,k]=getRef(path);o[k]=type==='number'?(parseFloat(String(v).replace(',','.'))||0):v;save();queueRender()}
 // Перерисовка с задержкой: иначе кнопка, на которую нажали сразу после правки поля, исчезает из-под пальца
-function queueRender(){clearTimeout(RT);RT=setTimeout(()=>{const a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='SELECT')&&a.closest&&a.closest('#sheet'))return;render()},500)}
+function queueRender(){clearTimeout(RT);RT=setTimeout(function f(){const a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='SELECT')&&a.closest&&a.closest('#sheet')){RT=setTimeout(f,1500);return}render()},500)}
 const CARD_KEYS=['salary','interest','taxes','mort','edu','car','cc','small','other','perKid','cardSavings'];
 function snapCard(p){const c={};CARD_KEYS.forEach(k=>c[k]=+p[k]||0);c.debt={};DEBT.forEach(([k])=>c.debt[k]=+p.debt[k]||0);return c}
 function logm(p,t){
@@ -181,6 +184,85 @@ function fastEvent(kind){const p=P();const cfg={tax:['Налоговая про�
   confirmM(cfg[0],cfg[1]+` Сейчас на руках ${$$(p.savings)}.`,()=>{const a=cfg[2]();p.savings-=a;logm(p,`${cfg[3]}: −${$$(a)}`)},true)}
 function setCur(v){SH.cur=v;CUR=v;save();render()}
 
+/* ---------- сделки между игроками ---------- */
+let DEALS=[];
+const myRole=d=>d.lender===USER.id?'lender':'borrower';
+const otherName=d=>myRole(d)==='lender'?d.borrower_name:d.lender_name;
+const OPENED=['active','repay_proposed','repaid','forgiven'];
+async function loadDeals(){
+  if(!CURG)return false;
+  const {data,error}=await sb.from('deals').select('*').eq('game_id',CURG.id);
+  if(error)return false;DEALS=data||[];return reconcile();
+}
+// Каждый игрок сам применяет сделку к своему бланку: так у обоих деньги и долги совпадают
+function reconcile(){
+  if(LOCK||!SH)return false;const p=SH;if(!p.deals)p.deals={};let ch=false;
+  for(const d of DEALS){
+    if(d.lender!==USER.id&&d.borrower!==USER.id)continue;
+    const role=myRole(d),amt=+d.amount||0;
+    if(OPENED.includes(d.status)&&!p.deals[d.id]){
+      p.savings+=role==='borrower'?amt:-amt;
+      p.deals[d.id]={role,other:otherName(d),amount:amt,monthly:+d.monthly||0,terms:d.terms||'',state:'active'};
+      logm(p,`🤝 ${role==='borrower'?'Взял у игрока':'Дал игроку'} ${otherName(d)} ${$$(amt)}${+d.monthly?`, платёж ${$$(+d.monthly)}/мес`:''}${d.terms?': '+d.terms:''}`);ch=true;
+    }
+    const s=p.deals[d.id];
+    if(s&&s.state==='active'&&d.status==='repaid'){const a=+d.repay_amount||s.amount;p.savings+=role==='borrower'?-a:a;s.state='repaid';logm(p,`🤝 Долг ${role==='borrower'?'возвращён игроку':'возвращён мне игроком'} ${s.other}: ${$$(a)}`);ch=true}
+    if(s&&s.state==='active'&&d.status==='forgiven'){s.state='forgiven';logm(p,`🤝 Долг ${s.amount?$$(s.amount):''} ${role==='borrower'?'прощён мне игроком':'прощён мной игроку'} ${s.other}`);ch=true}
+  }
+  if(ch)save();return ch;
+}
+async function dealNew(){
+  if(LOCK)return;
+  const {data,error}=await sb.rpc('list_game_players',{p_game:CURG.id});
+  if(error)return info('Ошибка',esc(error.message));
+  const mates=(data||[]).filter(r=>r.user_id!==USER.id);
+  if(!mates.length)return info('Нет других игроков','Сделки возможны, когда в этой игре есть другие игроки (они входят по коду игры).');
+  modal('Сделка с игроком',[
+    {k:'t',l:'Что произошло',t:'sel',o:[['took','Я взял деньги у игрока'],['gave','Я дал деньги игроку']]},
+    {k:'u',l:'Игрок',t:'sel',o:mates.map(m=>[m.user_id,m.name||'Игрок'])},
+    {k:'a',l:'Сумма, '+CUR,v:''},
+    {k:'m',l:'Платёж заёмщика в месяц (проценты), '+CUR+'. 0 — без процентов',v:0},
+    {k:'c',l:'Условия (срок, как и когда вернуть)',t:'text',v:''}],async v=>{
+    if(v.a<=0)return'Введите сумму';if(v.m<0)return'Платёж не может быть отрицательным';
+    const p=P();if(v.t==='gave'&&v.a>p.savings)return`Не хватает наличных: на руках ${$$(p.savings)}`;
+    const m=mates.find(x=>x.user_id===v.u),me=p.name||uname(),gave=v.t==='gave';
+    const {error}=await sb.from('deals').insert({game_id:CURG.id,lender:gave?USER.id:v.u,borrower:gave?v.u:USER.id,lender_name:gave?me:m.name,borrower_name:gave?m.name:me,amount:v.a,monthly:v.m,terms:v.c,status:'proposed',created_by:USER.id});
+    if(error)return error.message;await loadDeals();return null;
+  },{ok:'Отправить на подтверждение',note:'Сделка вступит в силу, когда второй игрок подтвердит её у себя. Тогда деньги автоматически поступят одному и спишутся у другого, а ежемесячный платёж войдёт в расчётный чек обоих (расход у заёмщика, пассивный доход у кредитора).'});
+}
+async function dealUpd(id,upd){const {error}=await sb.from('deals').update(upd).eq('id',id);if(error)throw new Error(error.message);await loadDeals()}
+async function dealAct(id,act){
+  const d=DEALS.find(x=>x.id===id);if(!d||LOCK)return;const p=P(),role=myRole(d),amt=+d.amount||0,ramt=+d.repay_amount||amt;
+  try{
+    if(act==='accept'){if(role==='lender'&&p.savings<amt)return info('Не хватает наличных',`Нужно ${$$(amt)}, на руках ${$$(p.savings)}.`);await dealUpd(id,{status:'active'})}
+    else if(act==='reject'||act==='cancel')await dealUpd(id,{status:d.status==='repay_proposed'?'active':(act==='reject'?'rejected':'cancelled')});
+    else if(act==='confirmRepay'){if(role==='borrower'&&p.savings<ramt)return info('Не хватает наличных',`Нужно ${$$(ramt)}, на руках ${$$(p.savings)}.`);await dealUpd(id,{status:'repaid'})}
+    else if(act==='repay')return modal('Возврат долга',[{k:'a',l:'Сумма возврата, '+CUR,v:amt}],async v=>{
+        if(v.a<=0)return'Введите сумму';if(role==='borrower'&&v.a>p.savings)return`Не хватает наличных: на руках ${$$(p.savings)}`;
+        await dealUpd(id,{status:'repay_proposed',repay_amount:v.a});return null},
+        {note:role==='borrower'?'Второй игрок подтвердит, что получил деньги. Тогда сумма спишется у вас и поступит ему, а платёж по долгу прекратится.':'Отметьте, что игрок вернул вам деньги. Он подтвердит это у себя.'});
+    else if(act==='forgive')return confirmM('Простить долг?',`${esc(d.borrower_name)} не будет возвращать ${$$(amt)}, ежемесячный платёж прекратится. Деньги не возвращаются.`,()=>dealUpd(id,{status:'forgiven'}));
+  }catch(e){return info('Ошибка',esc(e.message))}
+  render();
+}
+function dealsHtml(p,ro){
+  let h='';
+  if(!ro){
+    DEALS.filter(d=>(d.status==='proposed'||d.status==='repay_proposed')&&(d.lender===USER.id||d.borrower===USER.id)).forEach(d=>{
+      const role=myRole(d),mine=(d.status==='proposed'?d.created_by:d.repay_by)===USER.id;
+      const what=d.status==='proposed'
+        ?(role==='borrower'?`Вы берёте у ${esc(d.lender_name)} ${$$(+d.amount)}`:`Вы даёте ${esc(d.borrower_name)} ${$$(+d.amount)}`)+(+d.monthly?`, платёж ${$$(+d.monthly)}/мес`:', без процентов')+(d.terms?` · ${esc(d.terms)}`:'')
+        :`Возврат долга: ${esc(d.borrower_name)} → ${esc(d.lender_name)}, ${$$(+d.repay_amount||+d.amount)}`;
+      h+=`<div class="banner in">🤝 ${what}<div class="acts" style="margin:6px 0 0">${mine?`<span class="mu" style="align-self:center">Ждём подтверждения второго игрока</span><button class="s" onclick="dealAct('${d.id}','cancel')">Отменить</button>`:`<button class="s p" onclick="dealAct('${d.id}','${d.status==='proposed'?'accept':'confirmRepay'}')">Подтвердить</button><button class="s" onclick="dealAct('${d.id}','reject')">Отклонить</button>`}</div></div>`;
+    });
+  }
+  const act=Object.entries(p.deals||{}).filter(([,x])=>x.state==='active');
+  h+=act.length?listTable(['Игрок','Кто должен','Сумма','Платёж/мес','Условия'],act.map(([id,x])=>{
+    const d=DEALS.find(y=>y.id===id),busy=d&&d.status==='repay_proposed';
+    return`<tr><td>${esc(x.other)}</td><td>${x.role==='borrower'?'я должен':'мне должны'}</td><td>${$$(x.amount)}</td><td>${$$(x.monthly)}</td><td class="mu">${esc(x.terms)}</td><td style="white-space:nowrap">${ro?'':busy?'<span class="mu">возврат ждёт подтверждения</span>':`<button class="s" onclick="dealAct('${id}','repay')">${x.role==='borrower'?'Вернуть':'Мне вернули'}</button>${x.role==='lender'?` <button class="s" onclick="dealAct('${id}','forgive')">Простить</button>`:''}`}</td></tr>`}).join('')):'<div class="mu">Активных сделок нет</div>';
+  return`<div class="sec"><h2>Сделки с игроками</h2><div class="b">${h}${ro?'':'<div class="acts" style="margin:8px 0 0"><button onclick="dealNew()">🤝 Взять / дать деньги игроку</button></div><div class="mu">Деньги переходят только после подтверждения обоими игроками.</div>'}</div></div>`;
+}
+
 /* ---------- отчёт для разбора ---------- */
 function reportText(p){
   const c=calc(p),L=[];
@@ -192,6 +274,8 @@ function reportText(p){
   const A=[...p.stocks.map(s=>`${s.n} ${s.qty}×${$$(s.price)}`),...p.re.map(a=>`${a.n} (взнос ${$$(a.down)}, поток ${$$(a.income)})`),...p.biz.map(a=>`${a.n} (взнос ${$$(a.down)}, поток ${$$(a.income)})`),...((p.fast&&p.fast.biz)||[]).map(a=>`${a.n} (скоростная: взнос ${$$(a.cost)}, поток ${$$(a.income)})`)];
   L.push('Активы: '+(A.join('; ')||'нет'));
   L.push(`Всякая всячина: ${p.stats.doodads} раз на ${$$(p.stats.doodadSum)}; кредитов банка: ${p.stats.loans} на ${$$(p.stats.loanSum)} (долг сейчас ${$$(p.loan)}); благотворительность: ${$$(p.stats.charity)}; ручных правок: ${p.stats.manual}`);
+  const DLr=Object.values(p.deals||{});
+  if(DLr.length)L.push('Сделки с игроками: '+DLr.map(x=>`${x.role==='borrower'?'взял у':'дал'} ${x.other} ${$$(x.amount)} (${$$(x.monthly)}/мес, ${x.state==='active'?'активна':x.state==='repaid'?'погашена':'прощена'})`).join('; '));
   const idle=c.assets?Math.round(p.savings/c.assets*100):0;
   L.push(`Доля «мёртвых» наличных в активах: ${idle}%`);
   L.push('Журнал (от старых к новым):');
@@ -246,10 +330,10 @@ function sheet(p,ro){
   if(!p.fast){
     h+=`<div class="cols"><div>
     <div class="sec"><h2>Доходы</h2><div class="b">${row('Зарплата','salary',p.salary)}${row('Проценты','interest',p.interest)}
-      <div class="r"><span>Дивиденды (из акций)</span><b>${$$(c.div)}</b></div><div class="r"><span>Недвижимость</span><b>${$$(c.re)}</b></div><div class="r"><span>Бизнес и предприятия</span><b>${$$(c.biz)}</b></div></div></div>
+      <div class="r"><span>Дивиденды (из акций)</span><b>${$$(c.div)}</b></div><div class="r"><span>Недвижимость</span><b>${$$(c.re)}</b></div><div class="r"><span>Бизнес и предприятия</span><b>${$$(c.biz)}</b></div>${c.pIn?`<div class="r"><span>Проценты по займам игрокам</span><b>${$$(c.pIn)}</b></div>`:''}</div></div>
     <div class="sec"><h2>Расходы</h2><div class="b">${EXP.map(([k,l])=>row(l,k,p[k])).join('')}
       <div class="r"><span>Детей (не более 3)</span><b>${p.kids}</b></div>${row('Расходы на одного ребёнка','perKid',p.perKid)}
-      <div class="r"><span>Расходы на детей</span><b>${$$(c.kidsExp)}</b></div><div class="r"><span>Оплата кредита банка (10%)</span><b>${$$(c.loanPay)}</b></div></div></div>
+      <div class="r"><span>Расходы на детей</span><b>${$$(c.kidsExp)}</b></div><div class="r"><span>Оплата кредита банка (10%)</span><b>${$$(c.loanPay)}</b></div>${c.pOut?`<div class="r"><span>Платежи по долгам игрокам</span><b>${$$(c.pOut)}</b></div>`:''}</div></div>
     </div><div>
     <div class="sec"><h2>Итоги</h2><div class="b">
       <div class="r"><span>Пассивный доход (проценты + дивиденды + аренда + бизнес)</span><b class="big pos">${$$(c.ratPassive)}</b></div>
@@ -272,6 +356,7 @@ function sheet(p,ro){
       <div class="r"><span>Деньги на руках</span>${inp('savings',p.savings)}</div></div></div>
     </div><div>`;
   }
+  if(!real&&(p.started||Object.keys(p.deals||{}).length))h+=dealsHtml(p,ro);
   h+=`<div class="sec"><h2>Журнал</h2><div class="b log">${p.log.length?p.log.map(t=>`<div>${esc(t)}</div>`).join(''):'Пока пусто'}</div></div></div></div>`;
   if(!p.fast){
     h+=`<div class="sec"><h2>Балансовый отчёт</h2><div class="b"><div class="cols"><div>
@@ -283,6 +368,7 @@ function sheet(p,ro){
       ${assetTable(p,'re')}
       <div class="mu" style="margin-top:8px">Бизнес</div>
       ${assetTable(p,'biz')}
+      ${c.pLent?`<div class="r"><span>Займы, выданные игрокам</span><b>${$$(c.pLent)}</b></div>`:''}
       <div class="r t"><span>Всего активов</span><b>${$$(c.assets)}</b></div>
     </div><div>
       <b>Пассивы</b>
@@ -290,6 +376,7 @@ function sheet(p,ro){
       <div class="r"><span>Ипотека недвижимости</span><b>${$$(sum(p.re,'debt'))}</b></div>
       <div class="r"><span>Пассивы (бизнес)</span><b>${$$(sum(p.biz,'debt'))}</b></div>
       <div class="r"><span>Кредит банка</span><b>${$$(p.loan)}</b></div>
+      ${c.pBorr?`<div class="r"><span>Долги игрокам</span><b>${$$(c.pBorr)}</b></div>`:''}
       <div class="r t"><span>Всего пассивов</span><b>${$$(c.liab)}</b></div>
       ${out('Чистая стоимость (активы − пассивы)',c.net)}
     </div></div></div></div>`;
@@ -513,7 +600,8 @@ async function playerGame(gid){
     if(String(g.title).startsWith('💼')){SH.real=true;SH.started=true;SH.cur='₸'}
     const {error:e3}=await persist();if(e3)throw e3;
   }
-  HIST=[JSON.stringify(SH)];dirty=false;SAVEST='ok';
+  HIST=[JSON.stringify(SH)];dirty=false;SAVEST='ok';DEALS=[];
+  LOCK=g.status==='finished'||FIN||SH.out;await loadDeals();
   renderGame();
 }
 function renderGame(){
@@ -526,6 +614,7 @@ function renderGame(){
   ${LOCK?'':`<div class="acts" style="margin-top:12px"><button class="p" onclick="finishGame()">🏁 Завершить мою игру</button></div>`}${foot()}`);
   if(LOCK)lockInputs($('sheet'));
   stat();
+  POLL=setInterval(async()=>{if($('ov').style.display==='flex')return;const before=JSON.stringify(DEALS);let ch=false;try{ch=await loadDeals()}catch(e){}if(ch||JSON.stringify(DEALS)!==before)queueRender()},8000);
 }
 function finishGame(){confirmM('Завершить игру?','Результат попадёт в вашу статистику. Позже можно продолжить, если организатор не закрыл игру.',async()=>{FIN=true;dirty=false;const {error}=await persist();if(error)throw error;SAVEST='ok'})}
 async function resumeGame(){FIN=false;dirty=false;const {error}=await persist();if(error)return fail(error);renderGame()}

@@ -115,3 +115,77 @@ create policy prof_select on public.professions for select to authenticated usin
 create policy prof_insert on public.professions for insert to authenticated with check (created_by = auth.uid());
 create policy prof_update on public.professions for update to authenticated using (created_by = auth.uid()) with check (created_by = auth.uid());
 create policy prof_delete on public.professions for delete to authenticated using (created_by = auth.uid());
+
+-- ===== Сделки между игроками (займы): безопасно выполнять повторно =====
+create table if not exists public.deals (
+  id uuid primary key default gen_random_uuid(),
+  game_id uuid not null references public.games(id) on delete cascade,
+  lender uuid not null references auth.users(id) on delete cascade,
+  borrower uuid not null references auth.users(id) on delete cascade,
+  lender_name text not null default '',
+  borrower_name text not null default '',
+  amount numeric not null check (amount > 0),
+  monthly numeric not null default 0 check (monthly >= 0),
+  terms text not null default '',
+  status text not null default 'proposed' check (status in ('proposed','active','rejected','cancelled','repay_proposed','repaid','forgiven')),
+  created_by uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  repay_amount numeric,
+  repay_by uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (lender <> borrower)
+);
+create index if not exists deals_game_idx on public.deals(game_id);
+alter table public.deals enable row level security;
+
+create or replace function public.is_player_in(gid uuid, uid uuid) returns boolean
+  language sql stable security definer set search_path = public as
+  $$ select exists (select 1 from public.game_players p where p.game_id = gid and p.user_id = uid) $$;
+grant execute on function public.is_player_in(uuid, uuid) to authenticated;
+
+-- Список игроков стола (только имя, которое игрок выбрал для показа) — для участников и организатора
+create or replace function public.list_game_players(p_game uuid) returns table (user_id uuid, name text)
+  language sql stable security definer set search_path = public as
+  $$ select p.user_id, p.name from public.game_players p
+     where p.game_id = p_game and (public.is_game_member(p_game) or public.is_game_host(p_game))
+     order by p.name $$;
+revoke all on function public.list_game_players(uuid) from public, anon;
+grant execute on function public.list_game_players(uuid) to authenticated;
+
+drop policy if exists deals_select on public.deals;
+drop policy if exists deals_insert on public.deals;
+drop policy if exists deals_update on public.deals;
+create policy deals_select on public.deals for select to authenticated
+  using (lender = auth.uid() or borrower = auth.uid() or public.is_game_host(game_id));
+create policy deals_insert on public.deals for insert to authenticated
+  with check (created_by = auth.uid() and status = 'proposed' and (lender = auth.uid() or borrower = auth.uid())
+              and public.is_player_in(game_id, lender) and public.is_player_in(game_id, borrower) and public.game_is_open(game_id));
+create policy deals_update on public.deals for update to authenticated
+  using (lender = auth.uid() or borrower = auth.uid()) with check (lender = auth.uid() or borrower = auth.uid());
+
+-- Проверка переходов: подтверждает всегда второй игрок, условия сделки менять нельзя
+create or replace function public.deals_guard() returns trigger language plpgsql as $$
+begin
+  if new.game_id <> old.game_id or new.lender <> old.lender or new.borrower <> old.borrower
+     or new.amount <> old.amount or new.monthly <> old.monthly or new.created_by <> old.created_by
+     or new.terms <> old.terms then
+    raise exception 'Условия сделки менять нельзя';
+  end if;
+  if new.status = old.status then return new; end if;
+  if old.status in ('rejected','cancelled','repaid','forgiven') then raise exception 'Сделка уже закрыта'; end if;
+  if old.status = 'proposed' then
+    if new.status not in ('active','rejected','cancelled') then raise exception 'Недопустимое действие'; end if;
+    if new.status = 'active' and auth.uid() = old.created_by then raise exception 'Сделку подтверждает второй игрок'; end if;
+  elsif old.status = 'active' then
+    if new.status not in ('repay_proposed','forgiven') then raise exception 'Недопустимое действие'; end if;
+    if new.status = 'forgiven' and auth.uid() <> old.lender then raise exception 'Простить долг может только тот, кто дал деньги'; end if;
+    if new.status = 'repay_proposed' then new.repay_by := auth.uid(); end if;
+  elsif old.status = 'repay_proposed' then
+    if new.status not in ('repaid','active') then raise exception 'Недопустимое действие'; end if;
+    if new.status = 'repaid' and auth.uid() = old.repay_by then raise exception 'Возврат подтверждает второй игрок'; end if;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists deals_guard on public.deals;
+create trigger deals_guard before update on public.deals for each row execute function public.deals_guard();
