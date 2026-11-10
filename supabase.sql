@@ -189,3 +189,47 @@ begin
 end $$;
 drop trigger if exists deals_guard on public.deals;
 create trigger deals_guard before update on public.deals for each row execute function public.deals_guard();
+
+-- ===== Рейтинг, настройки стола (безопасно выполнять повторно) =====
+alter table public.profiles add column if not exists in_rating boolean not null default true;
+alter table public.games add column if not exists payoff text not null default 'none';
+alter table public.games drop constraint if exists games_payoff_chk;
+alter table public.games add constraint games_payoff_chk check (payoff in ('none','bank','all'));
+
+-- Рейтинг: p_scope = 'all' (все игроки) или 'mine' (игры, где я играл или был организатором)
+create or replace function public.leaderboard(p_scope text default 'all', p_from timestamptz default null)
+returns table (user_id uuid, name text, games int, exits int, wins int, firsts int, best_passive numeric, best_net numeric, avg_exit numeric, points int)
+language sql stable security definer set search_path = public as $$
+  with mygames as (
+    select g.id from public.games g where g.host = auth.uid()
+    union select gp.game_id from public.game_players gp where gp.user_id = auth.uid()
+  ), r as (
+    select gp.user_id, gp.game_id, gp.summary s
+    from public.game_players gp
+    where coalesce((gp.summary->>'real')::boolean, false) = false
+      and coalesce((gp.summary->>'turn')::int, 0) > 0
+      and (p_from is null or gp.updated_at >= p_from)
+      and (p_scope <> 'mine' or gp.game_id in (select id from mygames))
+  ), w as (
+    select r.*, (r.s->>'wonAt') is not null as won,
+      row_number() over (partition by r.game_id order by (r.s->>'wonAt')::bigint nulls last) as wr
+    from r
+  )
+  select w.user_id,
+    case when pr.display = 'nick' and coalesce(pr.nick, '') <> '' then pr.nick else coalesce(pr.full_name, 'Игрок') end,
+    count(*)::int,
+    (count(*) filter (where w.s->>'stage' = 'fast'))::int,
+    (count(*) filter (where w.won))::int,
+    (count(*) filter (where w.won and w.wr = 1))::int,
+    max((w.s->>'passive')::numeric),
+    max((w.s->>'net')::numeric),
+    round(avg((w.s->>'exitTurn')::numeric) filter (where w.s->>'stage' = 'fast'), 1),
+    (count(*) + 3 * count(*) filter (where w.s->>'stage' = 'fast') + 5 * count(*) filter (where w.won) + 2 * count(*) filter (where w.won and w.wr = 1))::int as pts
+  from w join public.profiles pr on pr.id = w.user_id
+  where pr.in_rating or w.user_id = auth.uid()
+  group by w.user_id, pr.display, pr.nick, pr.full_name
+  order by pts desc, 5 desc, 7 desc nulls last
+  limit 100
+$$;
+revoke all on function public.leaderboard(text, timestamptz) from public, anon;
+grant execute on function public.leaderboard(text, timestamptz) to authenticated;

@@ -39,11 +39,11 @@ function calc(p){
   else{passive=ratPassive;income=(+p.salary||0)+passive;cf=income-exp}
   const assets=(+p.savings||0)+(p.started?0:(+p.cardSavings||0))+p.stocks.reduce((t,s)=>t+s.qty*s.price,0)+sum(p.re,'cost')+sum(p.biz,'cost')+pLent;
   const liab=DEBT.reduce((t,[k])=>t+(+p.debt[k]||0),0)+sum(p.re,'debt')+sum(p.biz,'debt')+(+p.loan||0)+pBorr;
-  const won=!!(p.fast&&(passive>=goal||p.fast.dreamBought));
+  const cond=!!(p.fast&&(passive>=goal||p.fast.dreamBought)),won=!!p.wonAt;
   const prog=goal?Math.min(100,passive/goal*100):(exp?Math.min(100,ratPassive/exp*100):0);
-  return{pIn,pOut,pLent,pBorr,div,re,biz,ratPassive,kidsExp,loanPay,exp,passive,income,cf,goal,dreamCost,assets,liab,won,prog,net:assets-liab}
+  return{cond,pIn,pOut,pLent,pBorr,div,re,biz,ratPassive,kidsExp,loanPay,exp,passive,income,cf,goal,dreamCost,assets,liab,won,prog,net:assets-liab}
 }
-function summ(p){const c=calc(p);return{stage:p.fast?'fast':'rat',won:c.won,passive:Math.round(c.passive),exp:Math.round(c.exp),cf:Math.round(c.cf),net:Math.round(c.net),assets:Math.round(c.assets),liab:Math.round(c.liab),prog:Math.round(c.prog),prof:p.prof||'',savings:Math.round(+p.savings||0),turn:p.turn||0,exitTurn:p.exitTurn,real:!!p.real,wonAt:p.wonAt||null}}
+function summ(p){const c=calc(p);return{stage:p.fast?'fast':'rat',won:c.won,passive:Math.round(c.passive),exp:Math.round(c.exp),cf:Math.round(c.cf),net:Math.round(c.net),assets:Math.round(c.assets),liab:Math.round(c.liab),prog:Math.round(c.prog),loans:p.stats.loans||0,manual:p.stats.manual||0,doodads:p.stats.doodads||0,cond:c.cond,prof:p.prof||'',savings:Math.round(+p.savings||0),turn:p.turn||0,exitTurn:p.exitTurn,real:!!p.real,wonAt:p.wonAt||null}}
 
 /* ---------- ввод ---------- */
 function getRef(path){const a=path.split('.');let o=P();for(let i=0;i<a.length-1;i++)o=o[a[i]];return[o,a[a.length-1]]}
@@ -171,8 +171,15 @@ function halveDebts(){const p=P();confirmM('Сократить долги вдв
   ['car','cc','small'].forEach(k=>{p.debt[k]=p.debt[k]/2;p[k]=p[k]/2});logm(p,'Банкротство: долги (авто, карточки, мелкие) и платежи сокращены вдвое')},true)}
 function endBankrupt(){const p=P(),c=calc(p);if(c.cf<0)return info('Поток ещё отрицательный',`Месячный денежный поток ${$$(c.cf)}. Продавайте активы Банку и гасите долги. Если после этого поток остаётся отрицательным, вы выбываете из игры.`);p.bankrupt=false;logm(p,'Банкротство завершено: поток положительный');save();render()}
 function dropOut(){confirmM('Выбыть из игры?','Если после всех мер месячный денежный поток отрицательный, вы выбываете. Бланк станет только для чтения.',async()=>{const p=P();p.out=true;logm(p,'Выбыл из игры (банкротство)');FIN=true;SAVEST='pending';await persist();SAVEST='ok'})}
-function exitRace(){const p=P(),c=calc(p);const old=Math.round(c.ratPassive/1000)*1000;
-  confirmM('Выход на скоростную дорожку',`Пассивный доход ${$$(c.ratPassive)} → округляем до ${$$(old)}, ×100 = ${$$(old*100)} — новый доход в День денежного потока.\nВы сразу получаете эту сумму от Банка. Цель: купить Мечту или прибавить к начальному доходу ${$$(50000)}. Кредиты на скоростной дорожке брать нельзя.`,()=>{
+async function exitRace(){const p=P(),c=calc(p);
+  try{const {data}=await sb.from('games').select('payoff').eq('id',CURG.id).maybeSingle();if(data)CURG.payoff=data.payoff}catch(e){}
+  const debts=DEBT.filter(([k])=>+p.debt[k]>0).map(([k,l])=>`${l}: ${$$(p.debt[k])}`);if(+p.loan>0)debts.unshift(`Кредит банка: ${$$(p.loan)}`);
+  const rule=CURG.payoff||'none';
+  if(rule==='bank'&&+p.loan>0)return info('Сначала погасите кредит банка',`По правилам этого стола перед выходом на скоростную дорожку нужно погасить кредит банка (${$$(p.loan)}). Нажмите «Погасить кредит».`);
+  if(rule==='all'&&debts.length)return info('Сначала погасите долги','По правилам этого стола перед выходом на скоростную дорожку нужно погасить все кредиты и долги:\n'+debts.join('\n'));
+  const old=Math.round(c.ratPassive/1000)*1000;
+  confirmM('Выход на скоростную дорожку',`Пассивный доход ${$$(c.ratPassive)} → округляем до ${$$(old)}, ×100 = ${$$(old*100)} — новый доход в День денежного потока.\nВы сразу получаете эту сумму от Банка. Цель: купить Мечту или прибавить к начальному доходу ${$$(50000)}. Кредиты на скоростной дорожке брать нельзя.${debts.length?'\n\n⚠ У вас остались долги:\n'+debts.join('\n')+'\nЕсли по правилам вашего стола их гасят до выхода — нажмите «Отмена» и погасите.':''}`,()=>{
+    p.preFast=JSON.stringify(Object.assign({},p,{log:[]}));
     p.fast={old,start:old*100,biz:[],dreamName:'',dreamCost:0,bumps:0,dreamBought:false,charity:false};p.exitTurn=p.turn||0;p.savings+=old*100;p.charity=0;logm(p,`🚀 Вышел на скоростную дорожку (ход ${p.turn||0}). Начальный доход ${$$(old*100)} получен`)},true)}
 function buyFast(){modal('Купить предприятие (скоростная дорожка)',[{k:'n',l:'Название',t:'text',v:''},{k:'cost',l:'Первый взнос (цена), '+CUR,v:''},{k:'income',l:'Денежный поток в месяц, '+CUR,v:''}],v=>{const p=P();if(!v.n||v.cost<=0)return'Заполните название и цену';if(v.cost>p.savings)return`Не хватает денег: нужно ${$$(v.cost)}, на руках ${$$(p.savings)}`;p.savings-=v.cost;p.fast.biz.push({n:v.n,cost:v.cost,income:v.income});logm(p,`Предприятие: ${v.n}, взнос ${$$(v.cost)}, +${$$(v.income)}/мес`);save()})}
 function setDream(){const f=P().fast;modal('Ваша Мечта',[{k:'n',l:'Название мечты',t:'text',v:f.dreamName||''},{k:'c',l:'Цена, '+CUR,v:f.dreamCost||''}],v=>{if(!v.n||v.c<=0)return'Укажите название и цену';f.dreamName=v.n;f.dreamCost=v.c;logm(P(),`Мечта: ${v.n}, ${$$(v.c)}`);save()})}
@@ -182,6 +189,12 @@ function buyDream(){const p=P(),f=p.fast,c=calc(p);if(!f.dreamCost)return info('
     if(p.savings<c.dreamCost)throw new Error('Не хватает денег');p.savings-=c.dreamCost;f.dreamBought=true;logm(p,`🏆 Куплена Мечта «${f.dreamName}» за ${$$(c.dreamCost)}`)},true)}
 function fastEvent(kind){const p=P();const cfg={tax:['Налоговая проверка','Вы платите 1/2 наличных.',()=>Math.floor(p.savings/2),'Налоговая проверка'],div:['Развод','Вы теряете все наличные.',()=>p.savings,'Развод'],law:['Судебный иск','Вы теряете 1/2 наличных.',()=>Math.floor(p.savings/2),'Судебный иск']}[kind];
   confirmM(cfg[0],cfg[1]+` Сейчас на руках ${$$(p.savings)}.`,()=>{const a=cfg[2]();p.savings-=a;logm(p,`${cfg[3]}: −${$$(a)}`)},true)}
+function askWin(){if(LOCK||!SH||SH.wonAt||!calc(SH).cond)return;const f=SH.fast;
+  modal('🏆 Условия победы выполнены',[],async()=>{await claimWin()},{ok:'Да, закончить игру',note:`${f.dreamBought?`Вы купили Мечту «${esc(f.dreamName)}».`:`Доход в День денежного потока ${$$(calc(SH).passive)} достиг цели ${$$(calc(SH).goal)}.`}\nЗакончить игру победой?\n\nЕсли нужно сначала что-то поправить, нажмите «Отмена»: игра продолжится, а закончить можно будет кнопкой «🏆 Закончить игру победой».`})}
+async function claimWin(){const p=SH;if(!calc(p).cond)throw new Error('Условия победы сейчас не выполнены');p.wonAt=Date.now();logm(p,'🏆 Победа! Игра закончена');FIN=true;dirty=false;clearTimeout(st);SAVEST='pending';const {error}=await persist();if(error){FIN=false;p.wonAt=null;throw error}SAVEST='ok'}
+function backToRat(){const p=P();if(!p.fast||!p.preFast)return info('Нельзя вернуться','Нет сохранённого состояния до выхода.');
+  confirmM('Вернуться на крысиные бега?','Выход на скоростную дорожку будет отменён: бланк вернётся к состоянию на момент выхода (наличные, активы, долги). Сделки с игроками и журнал сохранятся. Используйте, если вышли по ошибке или нужно сначала погасить кредиты.',()=>{
+    const old=JSON.parse(p.preFast);SH=normSheet(Object.assign(old,{log:p.log,deals:p.deals,turn:p.turn,stats:p.stats,fast:null,preFast:null,exitTurn:null,wonAt:null,winAsked:false}));logm(SH,'↩ Вернулся на крысиные бега (выход отменён)')},true)}
 function setCur(v){SH.cur=v;CUR=v;save();render()}
 
 /* ---------- сделки между игроками ---------- */
@@ -287,7 +300,7 @@ function showPolicy(){modal('Согласие на обработку персо
 
 Оператор: [наименование / ФИО, контакт].
 Какие данные: имя и фамилия, никнейм, email, номер телефона WhatsApp, данные ваших игр (бланки, результаты).
-Зачем: регистрация и вход, проведение игр, ваша статистика, показ данных организатору вашей игры (имя, никнейм, бланк); при отдельной галочке — новости о проекте C4%.
+Зачем: регистрация и вход, проведение игр, ваша статистика, показ данных организатору вашей игры (имя, никнейм, бланк); показ выбранного вами имени и игровых результатов в рейтинге игроков (можно отключить в «Профиле»); при отдельной галочке — новости о проекте C4%.
 Где хранятся: сервис Supabase (облачная база данных).
 Срок: пока действует аккаунт; вы можете изменить данные в разделе «Профиль» или попросить удалить аккаунт по контакту оператора.
 Согласие на новости отдельное и необязательное; его можно снять в «Профиле».`})}
@@ -310,7 +323,7 @@ function sheet(p,ro){
     }else if(!p.out){
       h+=`<div class="acts"><button class="g" onclick="payday()">💵 ${p.fast?'День денежного потока':'Расчётный чек'} (${$$(c.cf)})</button><button onclick="nextTurn()">🎲 Следующий ход (№${(p.turn||0)+1})</button><button onclick="undo()" ${HIST.length>1?'':'disabled'}>↶ Отменить</button><button onclick="adjust()">± Наличные</button><button onclick="showReport()">📋 Отчёт</button></div>`;
       if(!p.fast)h+=`<div class="acts"><button onclick="buyStock()">Акции/фонды</button><button onclick="buyAsset('re')">Недвижимость</button><button onclick="buyAsset('biz')">Бизнес</button><button onclick="doodad()">🛍 Всякая всячина</button><button onclick="charityRat()">❤ Благотворительность</button><button onclick="baby()" ${p.kids>=3?'disabled':''}>👶 Ребёнок (${p.kids}/3)</button><button onclick="downsize()">💼 Увольнение</button><button onclick="takeLoan()">Взять кредит</button><button onclick="repayLoan()" ${p.loan?'':'disabled'}>Погасить кредит</button></div>`;
-      else h+=`<div class="acts"><button onclick="buyFast()">Купить предприятие</button><button onclick="setDream()">⭐ Выбрать Мечту</button><button class="p" onclick="buyDream()">🏆 Купить Мечту</button><button onclick="bumpDream()">+100% к Мечте (жетон соперника)</button><button onclick="charityFast()">❤ Благотворительность</button><button onclick="fastEvent('tax')">Налоговая проверка</button><button onclick="fastEvent('div')">Развод</button><button onclick="fastEvent('law')">Судебный иск</button></div>`;
+      else h+=`<div class="acts"><button onclick="buyFast()">Купить предприятие</button><button onclick="setDream()">⭐ Выбрать Мечту</button><button class="p" onclick="buyDream()">🏆 Купить Мечту</button><button onclick="bumpDream()">+100% к Мечте (жетон соперника)</button><button onclick="charityFast()">❤ Благотворительность</button><button onclick="fastEvent('tax')">Налоговая проверка</button><button onclick="fastEvent('div')">Развод</button><button onclick="fastEvent('law')">Судебный иск</button><button onclick="backToRat()">↩ Отменить выход (на крысиные бега)</button></div>`;
     }
   }
   if(!real){
@@ -324,7 +337,8 @@ function sheet(p,ro){
       h+=`<div class="banner ${ok?'ok':'no'}">${ok?'✅ Пассивный доход превысил расходы — в начале хода можно выйти на скоростную дорожку!':`Крысиные бега: пассивный доход ${$$(c.ratPassive)} из ${$$(c.exp)} расходов (не хватает ${$$(Math.max(0,c.exp-c.ratPassive))})`}</div>${ok&&!ro?'<div class="acts"><button class="p" onclick="exitRace()">🚀 Выйти на скоростную дорожку</button></div>':''}`;
     }
     if(p.fast){
-      h+=`<div class="banner ${c.won?'ok':'no'}">${c.won?'🏆 Победа! Цель достигнута.':`Скоростная дорожка. Цель: Мечта (${p.fast.dreamCost?$$(c.dreamCost):'не выбрана'}) или доход в День денежного потока ${$$(c.goal)} (ещё ${$$(c.goal-c.passive)}).`}</div>`;
+      h+=c.cond&&!c.won?`<div class="banner ok">🏆 Условия победы выполнены!${ro?'':' <button class="p" onclick="askWin()">Закончить игру победой</button> <span class="mu">или продолжайте, если нужно что-то поправить</span>'}</div>`:'';
+      h+=`<div class="banner ${c.won?'ok':'no'}">${c.won?'🏆 Победа! Игра закончена.':`Скоростная дорожка. Цель: Мечта (${p.fast.dreamCost?$$(c.dreamCost):'не выбрана'}) или доход в День денежного потока ${$$(c.goal)} (ещё ${$$(c.goal-c.passive)}).`}</div>`;
     }
   }
   if(!p.fast){
@@ -393,7 +407,8 @@ function save(){
   if(LOCK||!CURG)return;
   if(!SH.log.length)SH.card=snapCard(SH);
   const c=calc(SH);
-  if(c.won&&!SH.wonAt){SH.wonAt=Date.now();SH.log.unshift('🏆 Победа!')}
+  if(c.cond&&!SH.wonAt&&!SH.winAsked){SH.winAsked=true;setTimeout(askWin,350)}
+  if(!c.cond&&SH.winAsked&&!SH.wonAt)SH.winAsked=false;
   pushHist();dirty=true;SAVEST='pending';stat();clearTimeout(st);st=setTimeout(flush,700);
 }
 async function flush(){
@@ -422,7 +437,7 @@ window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();INSTALL=e;c
 async function doInstall(){if(!INSTALL)return;INSTALL.prompt();try{await INSTALL.userChoice}catch(e){}INSTALL=null;const b=$('inst');if(b)b.style.display='none'}
 
 /* ---------- вход, регистрация, профиль ---------- */
-let AUTHMODE='in';
+let AUTHMODE='in',LB={scope:'mine',period:'all'};
 const PHONE_HINT='+7 7XX XXX XX XX';
 function normPhone(v){const digits=String(v||'').replace(/\D/g,'');if(digits.length<10||digits.length>15)return null;return '+'+(digits.length===11&&digits[0]==='8'?'7'+digits.slice(1):digits)}
 function profFields(p){return`
@@ -434,15 +449,16 @@ function profFields(p){return`
   <div class="mu">Организатор игры всегда видит и имя, и никнейм.</div>
   <input class="fld" id="fp" type="tel" placeholder="Телефон WhatsApp (${PHONE_HINT})" autocomplete="tel" value="${esc(p.phone||'')}">
   <label class="r" style="align-items:flex-start;margin-top:6px"><input type="checkbox" id="fpd" ${p.pd?'checked':''}><span>Согласен на <a href="#" onclick="showPolicy();return false">обработку персональных данных</a> (обязательно)</span></label>
-  <label class="r" style="align-items:flex-start"><input type="checkbox" id="fnw" ${p.news?'checked':''}><span>Хочу получать информацию и новости о проекте C4%</span></label>`}
+  <label class="r" style="align-items:flex-start"><input type="checkbox" id="fnw" ${p.news?'checked':''}><span>Хочу получать информацию и новости о проекте C4%</span></label>
+  <label class="r" style="align-items:flex-start"><input type="checkbox" id="frt" ${p.rating!==false?'checked':''}><span>Показывать меня в общем рейтинге игроков</span></label>`}
 function readProf(){
   const name=$('fn').value.trim(),nick=$('fk').value.trim(),display=(document.querySelector('input[name=fd]:checked')||{}).value||'name';
-  const phone=normPhone($('fp').value),news=$('fnw').checked,pd=$('fpd').checked;
+  const phone=normPhone($('fp').value),news=$('fnw').checked,pd=$('fpd').checked,rating=$('frt').checked;
   if(name.split(/\s+/).filter(Boolean).length<2)return{err:'Введите имя и фамилию'};
   if(display==='nick'&&!nick)return{err:'Вы выбрали показ никнейма — введите никнейм'};
   if(!phone)return{err:'Введите номер WhatsApp в международном формате, например '+PHONE_HINT};
   if(!pd)return{err:'Необходимо согласие на обработку персональных данных'};
-  return{name,nick,display,phone,news,pd};
+  return{name,nick,display,phone,news,pd,rating};
 }
 function authScreen(){
   view(`<div class="auth"><h1 style="text-align:center;margin-bottom:6px">Финансовое мышление С4%</h1><p class="mu" style="text-align:center">бланк игрока для игры «Денежный поток» · статистика ваших игр</p>
@@ -464,7 +480,7 @@ async function doAuth(){
   $('ab').disabled=true;
   try{
     if(AUTHMODE==='up'){
-      const {data,error}=await sb.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname,data:{name:pf.name,nick:pf.nick,display:pf.display,phone:pf.phone,news:pf.news,pd:true}}});
+      const {data,error}=await sb.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname,data:{name:pf.name,nick:pf.nick,display:pf.display,phone:pf.phone,news:pf.news,pd:true,rating:pf.rating}}});
       if(error)throw error;
       if(!data.session){er.style.color='var(--in)';er.textContent='Письмо отправлено. Подтвердите email по ссылке из письма и войдите.';$('ab').disabled=false;return}
     }else{
@@ -498,7 +514,7 @@ async function ensureProfile(){
   if(error)throw error;
   if(data){PROFILE=data;return}
   const m=meta(),now=new Date().toISOString();
-  const row={id:USER.id,full_name:m.name||(USER.email||'').split('@')[0],nick:m.nick||'',display:(m.display==='nick'&&m.nick)?'nick':'name',phone:m.phone||'',news:!!m.news,news_at:m.news?now:null,pd_consent_at:m.pd?now:null};
+  const row={id:USER.id,full_name:m.name||(USER.email||'').split('@')[0],nick:m.nick||'',display:(m.display==='nick'&&m.nick)?'nick':'name',phone:m.phone||'',news:!!m.news,news_at:m.news?now:null,pd_consent_at:m.pd?now:null,in_rating:m.rating!==false};
   const r=await sb.from('profiles').upsert(row).select().single();
   if(r.error)throw r.error;PROFILE=r.data;
 }
@@ -506,14 +522,14 @@ async function profileScreen(){
   await ensureProfile();
   const p=PROFILE;
   REDRAW=()=>{};
-  view(`${topbar('#/','Профиль')}<div class="auth" style="margin-top:0">${profFields({name:p.full_name,nick:p.nick,display:p.display,phone:p.phone,news:p.news,pd:!!p.pd_consent_at})}
+  view(`${topbar('#/','Профиль')}<div class="auth" style="margin-top:0">${profFields({name:p.full_name,nick:p.nick,display:p.display,phone:p.phone,news:p.news,pd:!!p.pd_consent_at,rating:p.in_rating})}
   <div class="mu" style="margin-top:6px">Email: ${esc(USER.email||'')}</div>
   <button class="p fld" style="margin-top:10px" onclick="saveProfile()">Сохранить</button><div class="err" id="ae2"></div></div>`);
 }
 async function saveProfile(){
   const er=$('ae2');er.style.color='';er.textContent='';
   const pf=readProf();if(pf.err){er.textContent=pf.err;return}
-  const row={full_name:pf.name,nick:pf.nick,display:pf.display,phone:pf.phone,news:pf.news};
+  const row={full_name:pf.name,nick:pf.nick,display:pf.display,phone:pf.phone,news:pf.news,in_rating:pf.rating};
   if(pf.news!==!!PROFILE.news)row.news_at=pf.news?new Date().toISOString():null;
   if(!PROFILE.pd_consent_at)row.pd_consent_at=new Date().toISOString();
   const {data,error}=await sb.from('profiles').update(row).eq('id',USER.id).select().single();
@@ -567,6 +583,10 @@ async function home(){
   const turnsToExit=exitsR.filter(r=>S(r).exitTurn!=null).map(r=>+S(r).exitTurn);
   const avgExit=turnsToExit.length?Math.round(turnsToExit.reduce((t,x)=>t+x,0)/turnsToExit.length):null;
   const chron=[...rows].sort((x,y)=>new Date(x.updated_at)-new Date(y.updated_at)).map(r=>+S(r).net||0);
+  const lb=await sb.rpc('leaderboard',{p_scope:LB.scope,p_from:LB.period==='month'?new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString():null});
+  const LBR=lb.error?null:(lb.data||[]);const myI=LBR?LBR.findIndex(r=>r.user_id===USER.id):-1,me=myI>=0?LBR[myI]:null;
+  const fastRows=rows.filter(r=>S(r).stage==='fast');
+  const BAD=[['🎲','Первая игра',rows.length>=1],['🚀','Вырвался из крысиных бегов',exitsR.length>=1],['🏆','Первая победа',wins>=1],['⚡','Выход за 15 ходов и быстрее',turnsToExit.some(t=>t<=15)],['🧘','Выход без кредитов банка',fastRows.some(r=>!(+S(r).loans))],['💎','Чистая стоимость от $100 000',best('net')>=100000],['🎖','5 игр',rows.length>=5],['👑','3 победы',wins>=3]];
   REDRAW=()=>{};CUR='$';
   view(`${topbar('',`Привет, ${esc(uname())}!`,`<button class="s" id="inst" style="display:${INSTALL?'':'none'}" onclick="doInstall()">📲 Установить</button><button class="s" onclick="location.hash='#/profile'">⚙ Профиль</button><button class="s" onclick="logout()">Выйти</button>`)}
   ${isIOS&&!isStandalone&&!localStorage.getItem('cf101ios')?`<div class="banner in">Чтобы добавить на экран «Домой»: нажмите «Поделиться» в Safari → «На экран „Домой“». <button class="lnk" onclick="localStorage.setItem('cf101ios','1');home().catch(fail)">Понятно</button></div>`:''}
@@ -581,6 +601,13 @@ async function home(){
    <div class="st"><div class="l">Лучшая чистая стоимость</div><div class="v">${$$(best('net'))}</div></div>
    <div class="st"><div class="l">Средний денежный поток</div><div class="v">${$$(avgCf)}</div></div></div>
   <div class="sec"><h2>Чистая стоимость по играм</h2><div class="b">${spark(chron)}</div></div>
+  <div class="sec"><h2>Мои достижения</h2><div class="b badges">${BAD.map(([i,t,ok])=>`<span class="bdg ${ok?'on':''}" title="${t}">${i} ${t}</span>`).join('')}</div></div>
+  <h2 class="pg">🏆 Рейтинг игроков</h2>
+  <div class="tabs"><button class="${LB.scope==='mine'?'on':''}" onclick="LB.scope='mine';home().catch(fail)">Мои столы</button><button class="${LB.scope==='all'?'on':''}" onclick="LB.scope='all';home().catch(fail)">Все игроки</button><span class="sp"></span><button class="${LB.period==='all'?'on':''}" onclick="LB.period='all';home().catch(fail)">За всё время</button><button class="${LB.period==='month'?'on':''}" onclick="LB.period='month';home().catch(fail)">Этот месяц</button></div>
+  ${LBR===null?`<div class="banner no">Рейтинг недоступен: выполните обновлённый supabase.sql (${esc(lb.error.message)})</div>`:!LBR.length?'<div class="sec"><div class="b mu">Пока нет сыгранных игр за этот период.</div></div>':`
+  ${me?`<div class="banner ok">Вы на ${myI+1}-м месте из ${LBR.length} · ${me.points} очков${myI>0?` · до ${myI}-го места ${LBR[myI-1].points-me.points+1} очк.`:' · вы лидер!'}</div>`:''}
+  <div class="sec"><div class="b scroll"><table class="tb"><tr><th>#</th><th>Игрок</th><th>Очки</th><th>Игр</th><th>Выходов</th><th>Побед</th><th>Ходов до выхода</th><th>Лучший пассивный</th></tr>${LBR.map((r,i)=>`<tr${r.user_id===USER.id?' class="me"':''}><td>${['🥇','🥈','🥉'][i]||i+1}</td><td><b>${esc(r.name)}</b></td><td><b>${r.points}</b></td><td>${r.games}</td><td>${r.exits}</td><td>${r.wins}${r.firsts?` <span class="mu">(${r.firsts} первым)</span>`:''}</td><td>${r.avg_exit==null?'—':r.avg_exit}</td><td>${$$(+r.best_passive||0)}</td></tr>`).join('')}</table></div></div>
+  <div class="mu">Очки: участие в игре — 1, выход на скоростную дорожку — 3, победа — 5, первым победил за столом — ещё 2. Учитываются игры, где сделан хотя бы один ход; «реальный кэш-флоу» не учитывается.</div>`}
   <h2 class="pg">Мои игры</h2>
   <div class="sec">${all.length?all.map(r=>`<div class="gl" onclick="location.hash='#/game/${r.game_id}'"><div><b>${esc(r.games?r.games.title:'Игра')}</b> <span class="mu">${r.games?esc(r.games.code):''} · ${new Date(r.updated_at).toLocaleDateString('ru-RU')}</span><div class="mu">${S(r).real?'Реальные данные':(S(r).stage==='fast'?'Скоростная дорожка':'Крысиные бега')}${S(r).prof?' · '+esc(S(r).prof):''} · пассивный ${fmt(S(r).passive||0)} · поток ${fmt(S(r).cf||0)}</div></div><div>${S(r).won?'🏆':(r.finished?'✔':'▶')}</div></div>`).join(''):'<div class="b mu">Пока нет игр. Присоединитесь по коду или начните личную игру.</div>'}</div>
   ${hosted.length?`<h2 class="pg">Игры, которые я организую</h2><div class="sec">${hosted.map(g=>`<div class="gl" onclick="location.hash='#/host/${g.id}'"><div><b>${esc(g.title||'Игра')}</b> <span class="mu">код ${esc(g.code)} · ${new Date(g.created_at).toLocaleDateString('ru-RU')}</span></div><div class="mu">${g.status==='open'?'идёт':'завершена'}</div></div>`).join('')}</div>`:''}${foot()}`);
@@ -626,7 +653,7 @@ async function loadHost(gid){
   return{g:g.data,rows:p.data||[]};
 }
 function lineup(rows){return rows.map(r=>{const p=normSheet(r.sheet);p.name=p.name||r.name;return{r,p,c:calc(p)}})}
-function stageTxt(x){return x.c.won?'🏆 Победитель':x.p.out?'Выбыл':x.p.fast?'Скоростная дорожка':'Крысиные бега'}
+function stageTxt(x){return x.c.won?'🏆 Победитель':x.c.cond?'🏆 Условия выполнены':x.p.out?'Выбыл':x.p.fast?'Скоростная дорожка':'Крысиные бега'}
 function ranked(L){const grp=x=>x.c.won?0:x.p.fast?1:2;return [...L].sort((a,b)=>grp(a)-grp(b)||(grp(a)===0?(a.p.wonAt||0)-(b.p.wonAt||0):grp(a)===2?(b.c.prog-a.c.prog||b.c.passive-a.c.passive):b.c.passive-a.c.passive)||b.c.net-a.c.net)}
 async function hostView(gid,sub,uid){
   const draw=async()=>{
@@ -639,8 +666,9 @@ async function hostView(gid,sub,uid){
     const tabs=`<div class="tabs"><button class="${!sub?'on':''}" onclick="location.hash='#/host/${gid}'">📊 Стол</button><button class="${sub==='res'?'on':''}" onclick="location.hash='#/host/${gid}/res'">🏁 Итоги игры</button>${sub==='p'?'<button class="on">👁 Бланк игрока</button>':''}</div>`;
     const head=topbar('#/',esc(g.title||'Игра'),`<span class="pill ${g.status==='open'?'ok':''}">${g.status==='open'?'идёт':'завершена'}</span>`)+
       `<div class="sec"><div class="b" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><div><div class="mu">Код для игроков</div><div class="code">${esc(g.code)}</div></div><div class="mu" style="flex:1;min-width:200px">Игроки заходят в приложение → «Присоединиться по коду». Бланки появляются здесь автоматически.</div>
+      <label class="mu" style="display:block;min-width:220px">Перед выходом на скоростную дорожку<select onchange="setPayoff('${gid}',this.value)">${[['none','долги гасить не обязательно'],['bank','погасить кредит банка'],['all','погасить все кредиты и долги']].map(([k,l])=>`<option value="${k}" ${(g.payoff||'none')===k?'selected':''}>${l}</option>`).join('')}</select></label>
       <div class="acts" style="margin:0"><button onclick="location.hash='#/game/${gid}'">🎮 Играть самому</button><button onclick="setStatus('${gid}','${g.status==='open'?'finished':'open'}')">${g.status==='open'?'Завершить игру':'Открыть снова'}</button></div></div></div>`+
-      (first&&g.status==='open'?`<div class="banner ok">🏆 ${esc(first.p.name)} победил первым. По правилам, когда кто-то купил Мечту или достиг цели по доходу, игра заканчивается. <button class="lnk" onclick="setStatus('${gid}','finished')">Завершить игру</button></div>`:'');
+      (first&&g.status==='open'?`<div class="banner ok">🏆 ${esc(first.p.name)} победил первым и закончил игру. По правилам игра заканчивается, когда кто-то первым купил Мечту или достиг цели по доходу. <button class="lnk" onclick="setStatus('${gid}','finished')">Завершить игру</button></div>`:'');
     let body='';
     if(sub==='p'){
       const x=lineup(rows).find(y=>y.r.user_id===uid);
@@ -685,6 +713,7 @@ function resultsHtml(L){
   <div class="mu">Победитель — кто первым купил Мечту или достиг цели по доходу. Далее: скоростная дорожка по доходу, затем крысиные бега по доле покрытия расходов пассивным доходом. На итогах показаны имена так, как выбрали игроки.</div>`;
 }
 function copyRes(){const m=$('cpm');try{navigator.clipboard.writeText(window.__txt||'').then(()=>{m.textContent='Скопировано'},()=>{m.textContent='Не удалось скопировать'})}catch(e){m.textContent='Не удалось скопировать'}}
+async function setPayoff(gid,payoff){const {error}=await sb.from('games').update({payoff}).eq('id',gid);if(error)return fail(error)}
 async function setStatus(gid,status){const {error}=await sb.from('games').update({status}).eq('id',gid);if(error)return fail(error);route()}
 function kick(gid,id){confirmM('Убрать игрока?','Бланк игрока будет удалён из этой игры.',async()=>{const {error}=await sb.from('game_players').delete().eq('id',id);if(error)throw error;location.hash='#/host/'+gid})}
 

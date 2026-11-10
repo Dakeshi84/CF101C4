@@ -64,3 +64,7 @@ table.tb tr.cl{cursor:pointer}table.tb tr.cl:hover{background:var(--sel)}
 #md{background:var(--card);border-radius:12px;padding:16px;max-width:420px;width:100%;max-height:90vh;overflow:auto}
 #md h3{margin:0 0 10px}#md label{display:block;font-size:12px;color:var(--mu);margin:8px 0 3px}#md input,#md textarea{width:100%}
 #md .e{color:var(--out);margin-top:8px;font-size:14px}
+.badges{display:flex;flex-wrap:wrap;gap:6px}
+.bdg{padding:4px 10px;border-radius:999px;border:1px solid var(--bd,#ccc);opacity:.38;font-size:13px;white-space:nowrap}
+.bdg.on{opacity:1;border-color:var(--ac);font-weight:600}
+tr.me td{background:rgba(255,160,40,.14)}
